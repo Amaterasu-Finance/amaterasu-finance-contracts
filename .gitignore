@@ -1,0 +1,11 @@
+/**/artifacts/*
+/**/.deps/*
+.idea/
+
+*.pyc
+
+venv/
+
+build/
+
+.DS_Store

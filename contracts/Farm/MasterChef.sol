@@ -7,16 +7,9 @@ import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contr
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/token/ERC20/SafeERC20.sol";
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/utils/ReentrancyGuard.sol";
 
-import "./FoxToken.sol";
-import "../interfaces/IReferral.sol";
+import "./IzaToken.sol";
+import "../interfaces/IStake.sol";
 
-// MasterChef is the master of Fox. He can make Fox and he is a fair guy.
-//
-// Note that it's ownable and the owner wields tremendous power. The ownership
-// will be transferred to a governance smart contract once Fox is sufficiently
-// distributed and the community can show to govern itself.
-//
-// Have fun reading it. Hopefully it's bug-free. Hail Satan.
 contract MasterChef is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -25,36 +18,29 @@ contract MasterChef is Ownable, ReentrancyGuard {
     struct UserInfo {
         uint256 amount;         // How many LP tokens the user has provided.
         uint256 rewardDebt;     // Reward debt. See explanation below.
-        //
-        // We do some fancy math here. Basically, any point in time, the amount of Foxes
-        // entitled to a user but is pending to be distributed is:
-        //
-        //   pending reward = (user.amount * pool.accFoxPerShare) - user.rewardDebt
-        //
-        // Whenever a user deposits or withdraws LP tokens to a pool. Here's what happens:
-        //   1. The pool's `accFoxPerShare` (and `lastRewardBlock`) gets updated.
-        //   2. User receives the pending reward sent to his/her address.
-        //   3. User's `amount` gets updated.
-        //   4. User's `rewardDebt` gets updated.
     }
 
     // Info of each pool.
     struct PoolInfo {
         IERC20 lpToken;           // Address of LP token contract.
-        uint256 allocPoint;       // How many allocation points assigned to this pool. Foxes to distribute per block.
-        uint256 lastRewardBlock;  // Last block number that Foxes distribution occurs.
-        uint256 accFoxPerShare;   // Accumulated Foxes per share, times 1e18. See below.
+        uint256 allocPoint;       // How many allocation points assigned to this pool. Tokens to distribute per block.
+        uint256 lastRewardBlock;  // Last block number that Tokens distribution occurs.
+        uint256 accTokenPerShare;   // Accumulated tokens per share, times 1e18. See below.
         uint16 depositFeeBP;      // Deposit fee in basis points
     }
 
-    // The Fox TOKEN!
-    FoxToken public fox;
+    // The token!
+    IzaToken public token;
     address public devAddress;
     address public feeAddress;
-    address public vaultAddress;
+    address public marketingAddress;
+    address public stakingAddress;
 
-    // Fox tokens created per block.
-    uint256 public foxPerBlock = 50000000000000000;
+    uint256 public devRewardRate = 8;
+    uint256 public marketingRewardRate = 2;
+
+    // tokens created per block.
+    uint256 public tokenPerBlock = 1000000000000000000;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -62,38 +48,32 @@ contract MasterChef is Ownable, ReentrancyGuard {
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
-    // The block number when Fox mining starts.
+    // The block number when mining starts.
     uint256 public startBlock;
-
-    // Fox referral contract address.
-    IReferral public referral;
-    // Referral commission rate in basis points.
-    uint16 public referralCommissionRate = 0;
-    // Max referral commission rate: 5%.
-    uint16 public constant MAXIMUM_REFERRAL_COMMISSION_RATE = 500;
+    // Max deposit fee
+    uint256 public MAX_DEPOSIT_FEE = 600; // 6%
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event SetFeeAddress(address indexed user, address indexed newAddress);
     event SetDevAddress(address indexed user, address indexed newAddress);
-    event SetVaultAddress(address indexed user, address indexed newAddress);
-    event SetReferralAddress(address indexed user, IReferral indexed newAddress);
-    event UpdateEmissionRate(address indexed user, uint256 foxPerBlock);
-    event ReferralCommissionPaid(address indexed user, address indexed referrer, uint256 commissionAmount);
+    event SetMarketingAddress(address indexed user, address indexed newAddress);
+    event SetStakingAddress(address indexed user, address indexed newAddress);
+    event UpdateEmissionRate(address indexed user, uint256 tokenPerBlock);
 
     constructor(
-        FoxToken _fox,
+        IzaToken _token,
         uint256 _startBlock,
         address _devAddress,
         address _feeAddress,
-        address _vaultAddress
+        address _marketingAddress
     ) public {
-        fox = _fox;
+        token = _token;
         startBlock = _startBlock;
         devAddress = _devAddress;
         feeAddress = _feeAddress;
-        vaultAddress = _vaultAddress;
+        marketingAddress = _marketingAddress;
     }
 
     function poolLength() external view returns (uint256) {
@@ -108,7 +88,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
 
     // Add a new lp to the pool. Can only be called by the owner.
     function add(uint256 _allocPoint, IERC20 _lpToken, uint16 _depositFeeBP) external onlyOwner nonDuplicated(_lpToken) {
-        require(_depositFeeBP <= 10000, "add: invalid deposit fee basis points");
+        require(_depositFeeBP <= MAX_DEPOSIT_FEE, "add: invalid deposit fee basis points");
         uint256 lastRewardBlock = block.number > startBlock ? block.number : startBlock;
         totalAllocPoint = totalAllocPoint.add(_allocPoint);
         poolExistence[_lpToken] = true;
@@ -116,14 +96,14 @@ contract MasterChef is Ownable, ReentrancyGuard {
             lpToken: _lpToken,
             allocPoint: _allocPoint,
             lastRewardBlock: lastRewardBlock,
-            accFoxPerShare: 0,
+            accTokenPerShare: 0,
             depositFeeBP: _depositFeeBP
         }));
     }
 
-    // Update the given pool's Fox allocation point and deposit fee. Can only be called by the owner.
+    // Update the given pool's allocation point and deposit fee. Can only be called by the owner.
     function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP) external onlyOwner {
-        require(_depositFeeBP <= 10000, "set: invalid deposit fee basis points");
+        require(_depositFeeBP <= MAX_DEPOSIT_FEE, "set: invalid deposit fee basis points");
         totalAllocPoint = totalAllocPoint.sub(poolInfo[_pid].allocPoint).add(_allocPoint);
         poolInfo[_pid].allocPoint = _allocPoint;
         poolInfo[_pid].depositFeeBP = _depositFeeBP;
@@ -134,18 +114,18 @@ contract MasterChef is Ownable, ReentrancyGuard {
         return _to.sub(_from);
     }
 
-    // View function to see pending Foxes on frontend.
-    function pendingFox(uint256 _pid, address _user) external view returns (uint256) {
+    // View function to see pending tokens on frontend.
+    function pendingToken(uint256 _pid, address _user) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
-        uint256 accFoxPerShare = pool.accFoxPerShare;
+        uint256 accTokenPerShare = pool.accTokenPerShare;
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-            uint256 foxReward = multiplier.mul(foxPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-            accFoxPerShare = accFoxPerShare.add(foxReward.mul(1e18).div(lpSupply));
+            uint256 tokenReward = multiplier.mul(tokenPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
+            accTokenPerShare = accTokenPerShare.add(tokenReward.mul(1e18).div(lpSupply));
         }
-        return user.amount.mul(accFoxPerShare).div(1e18).sub(user.rewardDebt);
+        return user.amount.mul(accTokenPerShare).div(1e18).sub(user.rewardDebt);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -168,41 +148,37 @@ contract MasterChef is Ownable, ReentrancyGuard {
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-        uint256 foxReward = multiplier.mul(foxPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-        fox.mint(devAddress, foxReward.div(10));
-        fox.mint(address(this), foxReward);
-        pool.accFoxPerShare = pool.accFoxPerShare.add(foxReward.mul(1e18).div(lpSupply));
+        uint256 tokenReward = multiplier.mul(tokenPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
+        token.mint(devAddress, tokenReward.mul(devRewardRate).div(100));
+        token.mint(marketingAddress, tokenReward.mul(marketingRewardRate).div(100));
+        token.mint(address(this), tokenReward);
+        pool.accTokenPerShare = pool.accTokenPerShare.add(tokenReward.mul(1e18).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
 
-    // Deposit LP tokens to MasterChef for Fox allocation.
-    function deposit(uint256 _pid, uint256 _amount, address _referrer) public nonReentrant {
+    // Deposit LP tokens to MasterChef for allocation.
+    function deposit(uint256 _pid, uint256 _amount, address _to, bool _stake) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][msg.sender];
+        UserInfo storage user = userInfo[_pid][_to];
         updatePool(_pid);
-        if (_amount > 0 && address(referral) != address(0) && _referrer != address(0) && _referrer != msg.sender) {
-            referral.recordReferral(msg.sender, _referrer);
-        }
         if (user.amount > 0) {
-            uint256 pending = user.amount.mul(pool.accFoxPerShare).div(1e18).sub(user.rewardDebt);
+            uint256 pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
             if (pending > 0) {
-                safeFoxTransfer(msg.sender, pending);
-                payReferralCommission(msg.sender, pending);
+                safeTokenTransfer(msg.sender, pending, _stake);
             }
         }
         if (_amount > 0) {
             pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
-                pool.lpToken.safeTransfer(feeAddress, depositFee.div(2));
-                pool.lpToken.safeTransfer(vaultAddress, depositFee.div(2));
+                pool.lpToken.safeTransfer(feeAddress, depositFee);
                 user.amount = user.amount.add(_amount).sub(depositFee);
             } else {
                 user.amount = user.amount.add(_amount);
             }
         }
-        user.rewardDebt = user.amount.mul(pool.accFoxPerShare).div(1e18);
-        emit Deposit(msg.sender, _pid, _amount);
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
+        emit Deposit(_to, _pid, _amount);
     }
 
     // Withdraw LP tokens from MasterChef.
@@ -211,16 +187,15 @@ contract MasterChef is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
         updatePool(_pid);
-        uint256 pending = user.amount.mul(pool.accFoxPerShare).div(1e18).sub(user.rewardDebt);
+        uint256 pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
         if (pending > 0) {
-            safeFoxTransfer(msg.sender, pending);
-            payReferralCommission(msg.sender, pending);
+            safeTokenTransfer(msg.sender, pending, false);
         }
         if (_amount > 0) {
             user.amount = user.amount.sub(_amount);
             pool.lpToken.safeTransfer(address(msg.sender), _amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accFoxPerShare).div(1e18);
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
@@ -235,16 +210,21 @@ contract MasterChef is Ownable, ReentrancyGuard {
         emit EmergencyWithdraw(msg.sender, _pid, amount);
     }
 
-    // Safe fox transfer function, just in case if rounding error causes pool to not have enough Fox.
-    function safeFoxTransfer(address _to, uint256 _amount) internal {
-        uint256 foxBal = fox.balanceOf(address(this));
+    // Safe token transfer function, just in case if rounding error causes pool to not have enough Tokens.
+    function safeTokenTransfer(address _to, uint256 _amount, bool _stake) internal {
+        uint256 tokenBal = token.balanceOf(address(this));
         bool transferSuccess = false;
-        if (_amount > foxBal) {
-            transferSuccess = fox.transfer(_to, foxBal);
-        } else {
-            transferSuccess = fox.transfer(_to, _amount);
+        if (_amount > tokenBal) {
+            _amount = tokenBal;
         }
-        require(transferSuccess, "safeFoxTransfer: Transfer failed");
+        if (_stake && stakingAddress != address(0)) {
+            transferSuccess = true;
+            IERC20(address(token)).safeIncreaseAllowance(stakingAddress, _amount);
+            IStake(stakingAddress).enter(_amount, _to);
+        } else {
+            transferSuccess = token.transfer(_to, _amount);
+        }
+        require(transferSuccess, "safeTokenTransfer: Transfer failed");
     }
 
     // Update dev address by the previous dev.
@@ -258,40 +238,20 @@ contract MasterChef is Ownable, ReentrancyGuard {
         emit SetFeeAddress(msg.sender, _feeAddress);
     }
 
-    function setVaultAddress(address _vaultAddress) external onlyOwner {
-        vaultAddress = _vaultAddress;
-        emit SetVaultAddress(msg.sender, _vaultAddress);
+    function setStakingAddress(address _stakingAddress) external onlyOwner {
+        stakingAddress = _stakingAddress;
+        emit SetStakingAddress(msg.sender, _stakingAddress);
+    }
+
+    function setMarketingAddress(address _marketingAddress) external onlyOwner {
+        marketingAddress = _marketingAddress;
+        emit SetMarketingAddress(msg.sender, _marketingAddress);
     }
     
-    function updateEmissionRate(uint256 _foxPerBlock) external onlyOwner {
+    function updateEmissionRate(uint256 _tokenPerBlock) external onlyOwner {
         massUpdatePools();
-        foxPerBlock = _foxPerBlock;
-        emit UpdateEmissionRate(msg.sender, _foxPerBlock);
-    }
-
-    // Update the referral contract address by the owner
-    function setReferralAddress(IReferral _referral) external onlyOwner {
-        referral = _referral;
-        emit SetReferralAddress(msg.sender, _referral);
-    }
-
-    // Update referral commission rate by the owner
-    function setReferralCommissionRate(uint16 _referralCommissionRate) external onlyOwner {
-        require(_referralCommissionRate <= MAXIMUM_REFERRAL_COMMISSION_RATE, "setReferralCommissionRate: invalid referral commission rate basis points");
-        referralCommissionRate = _referralCommissionRate;
-    }
-
-    // Pay referral commission to the referrer who referred this user.
-    function payReferralCommission(address _user, uint256 _pending) internal {
-        if (address(referral) != address(0) && referralCommissionRate > 0) {
-            address referrer = referral.getReferrer(_user);
-            uint256 commissionAmount = _pending.mul(referralCommissionRate).div(10000);
-
-            if (referrer != address(0) && commissionAmount > 0) {
-                fox.mint(referrer, commissionAmount);
-                emit ReferralCommissionPaid(_user, referrer, commissionAmount);
-            }
-        }
+        tokenPerBlock = _tokenPerBlock;
+        emit UpdateEmissionRate(msg.sender, _tokenPerBlock);
     }
 
     // Only update before start of farm

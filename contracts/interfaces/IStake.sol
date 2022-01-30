@@ -1,10 +1,7 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0
 
-pragma solidity 0.6.12;
+pragma solidity >=0.5.0;
 
 interface IStake {
-    function deposit ( uint256 amount ) external;
-    function redeem ( uint256 amount ) external;
-    function claimRewards (  ) external;
-    function supplyAmount ( address ) external view returns ( uint256 );
+    function enter(uint256 value, address to) external;
 }

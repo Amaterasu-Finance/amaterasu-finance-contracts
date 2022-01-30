@@ -5,8 +5,6 @@ pragma solidity 0.6.12;
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/token/ERC20/SafeERC20.sol";
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/access/Ownable.sol";
 
-import "../interfaces/IReferral.sol";
-
 contract Operators is Ownable {
     mapping(address => bool) public operators;
 

@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at Etherscan.io on 2017-12-12
-*/
-
 // Copyright (C) 2015, 2016, 2017 Dapphub
 
 // This program is free software: you can redistribute it and/or modify
@@ -19,9 +15,9 @@
 
 pragma solidity ^0.4.18;
 
-contract WETH {
-    string public name     = "Wrapped Ether";
-    string public symbol   = "WETH";
+contract WETH9 {
+    string public name     = "Wrapped MTV";
+    string public symbol   = "WMTV";
     uint8  public decimals = 18;
 
     event  Approval(address indexed src, address indexed guy, uint wad);
@@ -61,8 +57,8 @@ contract WETH {
     }
 
     function transferFrom(address src, address dst, uint wad)
-        public
-        returns (bool)
+    public
+    returns (bool)
     {
         require(balanceOf[src] >= wad);
 

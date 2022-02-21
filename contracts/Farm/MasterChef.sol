@@ -40,7 +40,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
     uint256 public marketingRewardRate = 2;
 
     // tokens created per block.
-    uint256 public tokenPerBlock = 1000000000000000000;
+    uint256 public tokenPerBlock = 50000000000000000;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -54,6 +54,7 @@ contract MasterChef is Ownable, ReentrancyGuard {
     uint256 public MAX_DEPOSIT_FEE = 600; // 6%
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
+    event ClaimReward(address indexed user, uint256 indexed pid, bool stake);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event SetFeeAddress(address indexed user, address indexed newAddress);
@@ -69,6 +70,11 @@ contract MasterChef is Ownable, ReentrancyGuard {
         address _feeAddress,
         address _marketingAddress
     ) public {
+        require(_devAddress != address(0), "Bad _devAddress");
+        require(_feeAddress != address(0), "Bad _feeAddress");
+        require(_marketingAddress != address(0), "Bad _marketingAddress");
+        require(_startBlock > block.number, "Bad start block");
+
         token = _token;
         startBlock = _startBlock;
         devAddress = _devAddress;
@@ -157,18 +163,23 @@ contract MasterChef is Ownable, ReentrancyGuard {
     }
 
     // Deposit LP tokens to MasterChef for allocation.
-    function deposit(uint256 _pid, uint256 _amount, address _to, bool _stake) public nonReentrant {
+    function deposit(uint256 _pid, uint256 _amount, address _to) public nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_to];
         updatePool(_pid);
         if (user.amount > 0) {
             uint256 pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
             if (pending > 0) {
-                safeTokenTransfer(msg.sender, pending, _stake);
+                safeTokenTransfer(_to, pending, false);
             }
         }
         if (_amount > 0) {
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            // Accounting for tax tokens
+            uint256 beforeDeposit = pool.lpToken.balanceOf(address(this));
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
+            uint256 afterDeposit = pool.lpToken.balanceOf(address(this));
+            _amount = afterDeposit.sub(beforeDeposit);
+
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
                 pool.lpToken.safeTransfer(feeAddress, depositFee);
@@ -181,8 +192,45 @@ contract MasterChef is Ownable, ReentrancyGuard {
         emit Deposit(_to, _pid, _amount);
     }
 
+    // Claim Rewards
+    function claimReward(uint256 _pid, bool _stake) public nonReentrant {
+        PoolInfo storage pool = poolInfo[_pid];
+        UserInfo storage user = userInfo[_pid][msg.sender];
+        updatePool(_pid);
+        if (user.amount > 0) {
+            uint256 pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
+            if (pending > 0) {
+                safeTokenTransfer(msg.sender, pending, _stake);
+            }
+        }
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
+        emit ClaimReward(msg.sender, _pid, _stake);
+    }
+
+    // Deposit for staking
+    // Doesn't return the reward but instead adds it to the amount staked
+    function depositStaking(uint256 _amount) external {
+        require(msg.sender == stakingAddress, 'not staking address');
+        PoolInfo storage pool = poolInfo[0];
+        UserInfo storage user = userInfo[0][msg.sender];
+        updatePool(0);
+        uint256 pending = 0;
+        if (user.amount > 0) {
+            pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
+        }
+        if (_amount > 0) {
+            pool.lpToken.safeTransferFrom(_msgSender(), address(this), _amount);
+        }
+        if (_amount + pending > 0) {
+            // Just add pending to amount instead of returning rewards
+            user.amount = user.amount.add(_amount + pending);
+        }
+        user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
+        emit Deposit(msg.sender, 0, _amount);
+    }
+
     // Withdraw LP tokens from MasterChef.
-    function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
+    function withdraw(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");

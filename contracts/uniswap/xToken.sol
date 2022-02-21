@@ -106,8 +106,6 @@ contract xToken is Ownable, Pausable, ERC20 {
         }
         UserInfo storage user = userInfo[_to];
 
-        // user.shares = user.shares.add(currentShares);
-        // totalShares = totalShares.add(currentShares);
         _mint(_to, currentShares);
         totalShares = totalSupply();
         user.lastDepositedTime = block.timestamp;
@@ -125,12 +123,12 @@ contract xToken is Ownable, Pausable, ERC20 {
      * @dev Only possible when contract not paused.
      */
     function earn() external notContract whenNotPaused {
-        IMasterChef(masterchef).withdraw(0, 0);
-
         uint256 bal = available();
 
         uint256 currentCallFee = bal.mul(callFee).div(10000);
-        token.safeTransfer(msg.sender, currentCallFee);
+        if (currentCallFee > 0) {
+            token.safeTransfer(msg.sender, currentCallFee);
+        }
 
         _earn();
 
@@ -219,12 +217,12 @@ contract xToken is Ownable, Pausable, ERC20 {
      * @notice Calculates the total pending rewards that can be restaked
      * @return Returns total pending rewards
      */
-    function calculateTotalPendingRewards() external view returns (uint256) {
+    function calculateTotalPendingRewards() public view returns (uint256) {
         uint256 amount = IMasterChef(masterchef).pendingToken(0, address(this));
         amount = amount.add(available());
-
         return amount;
     }
+
 
     /**
      * @notice Calculates the price per share
@@ -246,8 +244,9 @@ contract xToken is Ownable, Pausable, ERC20 {
      * @param _shares: Number of xToken to burn
      */
     function leave(uint256 _shares) public notContract {
-        UserInfo storage user = userInfo[msg.sender];
         require(_shares > 0, "Nothing to withdraw");
+        UserInfo storage user = userInfo[msg.sender];
+        _earn();
         uint256 userShares = balanceOf(msg.sender);
         if (_shares > userShares) {
             _shares = userShares;
@@ -304,7 +303,7 @@ contract xToken is Ownable, Pausable, ERC20 {
      */
     function balanceOfThis() public view returns (uint256) {
         (uint256 amount, ) = IMasterChef(masterchef).userInfo(0, address(this));
-        return token.balanceOf(address(this)).add(amount);
+        return amount.add(calculateTotalPendingRewards());
     }
 
     /**
@@ -312,10 +311,8 @@ contract xToken is Ownable, Pausable, ERC20 {
      */
     function _earn() internal {
         uint256 bal = available();
-        if (bal > 0) {
-            IMasterChef(masterchef).deposit(0, bal, address(this), false);
-            lastEarnBlock = block.number;
-        }
+        IMasterChef(masterchef).depositStaking(bal);
+        lastEarnBlock = block.number;
     }
 
     /**

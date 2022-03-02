@@ -27,6 +27,10 @@ def setup_mainnet_accounts(dev_only=False):
     return Accounts(deployer, dev)
 
 
+def setup_testnet_accounts():
+    return Accounts(accounts[0], accounts[1])
+
+
 def send(coin, amt, to_, from_):
     return interface.IERC20(coin).transfer(to_, amt, {'from': from_})
 

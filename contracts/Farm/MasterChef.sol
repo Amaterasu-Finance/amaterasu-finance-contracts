@@ -36,8 +36,8 @@ contract MasterChef is Ownable, ReentrancyGuard {
     address public marketingAddress;
     address public stakingAddress;
 
-    uint256 public devRewardRate = 8;
-    uint256 public marketingRewardRate = 2;
+    uint256 public devRewardRate = 10;
+    uint256 public marketingRewardRate = 5;
 
     // tokens created per block.
     uint256 public tokenPerBlock = 50000000000000000;

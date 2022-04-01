@@ -9,6 +9,7 @@ import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contr
 
 import "./IzaToken.sol";
 import "../interfaces/IStake.sol";
+import "../interfaces/IRewarder.sol";
 
 contract MasterChef is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
@@ -23,8 +24,8 @@ contract MasterChef is Ownable, ReentrancyGuard {
     // Info of each pool.
     struct PoolInfo {
         IERC20 lpToken;           // Address of LP token contract.
-        uint256 allocPoint;       // How many allocation points assigned to this pool. Tokens to distribute per block.
-        uint256 lastRewardBlock;  // Last block number that Tokens distribution occurs.
+        uint256 allocPoint;       // How many allocation points assigned to this pool. Tokens to distribute per second.
+        uint256 lastRewardTime;  // Last block number that Tokens distribution occurs.
         uint256 accTokenPerShare;   // Accumulated tokens per share, times 1e18. See below.
         uint16 depositFeeBP;      // Deposit fee in basis points
     }
@@ -36,20 +37,22 @@ contract MasterChef is Ownable, ReentrancyGuard {
     address public marketingAddress;
     address public stakingAddress;
 
-    uint256 public devRewardRate = 10;
+    uint256 public devRewardRate = 15;
     uint256 public marketingRewardRate = 5;
 
-    // tokens created per block.
-    uint256 public tokenPerBlock = 50000000000000000;
+    // tokens created per second.
+    uint256 public tokenPerSecond = 25000000000000000;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
+    // Rewarder for each pool
+    IRewarder[] public rewarder;
     // Info of each user that stakes LP tokens.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
-    // The block number when mining starts.
-    uint256 public startBlock;
+    // The block timestamp when mining starts.
+    uint256 public startTime;
     // Max deposit fee
     uint256 public MAX_DEPOSIT_FEE = 600; // 6%
 
@@ -61,11 +64,11 @@ contract MasterChef is Ownable, ReentrancyGuard {
     event SetDevAddress(address indexed user, address indexed newAddress);
     event SetMarketingAddress(address indexed user, address indexed newAddress);
     event SetStakingAddress(address indexed user, address indexed newAddress);
-    event UpdateEmissionRate(address indexed user, uint256 tokenPerBlock);
+    event UpdateEmissionRate(address indexed user, uint256 tokenPerSecond);
 
     constructor(
         IzaToken _token,
-        uint256 _startBlock,
+        uint256 _startTime,
         address _devAddress,
         address _feeAddress,
         address _marketingAddress
@@ -73,10 +76,10 @@ contract MasterChef is Ownable, ReentrancyGuard {
         require(_devAddress != address(0), "Bad _devAddress");
         require(_feeAddress != address(0), "Bad _feeAddress");
         require(_marketingAddress != address(0), "Bad _marketingAddress");
-        require(_startBlock > block.number, "Bad start block");
+        require(_startTime > block.timestamp, "Bad start time");
 
         token = _token;
-        startBlock = _startBlock;
+        startTime = _startTime;
         devAddress = _devAddress;
         feeAddress = _feeAddress;
         marketingAddress = _marketingAddress;
@@ -93,15 +96,20 @@ contract MasterChef is Ownable, ReentrancyGuard {
     }
 
     // Add a new lp to the pool. Can only be called by the owner.
-    function add(uint256 _allocPoint, IERC20 _lpToken, uint16 _depositFeeBP) external onlyOwner nonDuplicated(_lpToken) {
+    function add(
+        uint256 _allocPoint,
+        IERC20 _lpToken,
+        uint16 _depositFeeBP
+    ) external onlyOwner nonDuplicated(_lpToken) {
         require(_depositFeeBP <= MAX_DEPOSIT_FEE, "add: invalid deposit fee basis points");
-        uint256 lastRewardBlock = block.number > startBlock ? block.number : startBlock;
+        uint256 lastRewardTime = block.timestamp > startTime ? block.timestamp : startTime;
         totalAllocPoint = totalAllocPoint.add(_allocPoint);
         poolExistence[_lpToken] = true;
+        rewarder.push(IRewarder(address(0)));
         poolInfo.push(PoolInfo({
             lpToken: _lpToken,
             allocPoint: _allocPoint,
-            lastRewardBlock: lastRewardBlock,
+            lastRewardTime: lastRewardTime,
             accTokenPerShare: 0,
             depositFeeBP: _depositFeeBP
         }));
@@ -115,7 +123,12 @@ contract MasterChef is Ownable, ReentrancyGuard {
         poolInfo[_pid].depositFeeBP = _depositFeeBP;
     }
 
-    // Return reward multiplier over the given _from to _to block.
+    // Update the given pool's rewarder
+    function setRewarder(uint256 _pid, IRewarder _rewarder) external onlyOwner {
+        rewarder[_pid] = _rewarder;
+    }
+
+    // Return reward multiplier over the given _from to _to time.
     function getMultiplier(uint256 _from, uint256 _to) public pure returns (uint256) {
         return _to.sub(_from);
     }
@@ -126,9 +139,9 @@ contract MasterChef is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accTokenPerShare = pool.accTokenPerShare;
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (block.number > pool.lastRewardBlock && lpSupply != 0) {
-            uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-            uint256 tokenReward = multiplier.mul(tokenPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
+        if (block.timestamp > pool.lastRewardTime && lpSupply != 0) {
+            uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
+            uint256 tokenReward = multiplier.mul(tokenPerSecond).mul(pool.allocPoint).div(totalAllocPoint);
             accTokenPerShare = accTokenPerShare.add(tokenReward.mul(1e18).div(lpSupply));
         }
         return user.amount.mul(accTokenPerShare).div(1e18).sub(user.rewardDebt);
@@ -145,21 +158,21 @@ contract MasterChef is Ownable, ReentrancyGuard {
     // Update reward variables of the given pool to be up-to-date.
     function updatePool(uint256 _pid) public {
         PoolInfo storage pool = poolInfo[_pid];
-        if (block.number <= pool.lastRewardBlock) {
+        if (block.timestamp <= pool.lastRewardTime) {
             return;
         }
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
         if (lpSupply == 0 || pool.allocPoint == 0) {
-            pool.lastRewardBlock = block.number;
+            pool.lastRewardTime = block.timestamp;
             return;
         }
-        uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
-        uint256 tokenReward = multiplier.mul(tokenPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
+        uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
+        uint256 tokenReward = multiplier.mul(tokenPerSecond).mul(pool.allocPoint).div(totalAllocPoint);
         token.mint(devAddress, tokenReward.mul(devRewardRate).div(100));
         token.mint(marketingAddress, tokenReward.mul(marketingRewardRate).div(100));
         token.mint(address(this), tokenReward);
         pool.accTokenPerShare = pool.accTokenPerShare.add(tokenReward.mul(1e18).div(lpSupply));
-        pool.lastRewardBlock = block.number;
+        pool.lastRewardTime = block.timestamp;
     }
 
     // Deposit LP tokens to MasterChef for allocation.
@@ -188,6 +201,11 @@ contract MasterChef is Ownable, ReentrancyGuard {
                 user.amount = user.amount.add(_amount);
             }
         }
+        // Interactions
+        IRewarder _rewarder = rewarder[_pid];
+        if (address(_rewarder) != address(0)) {
+            _rewarder.onReward(_pid, _to, _to, 0, user.amount);
+        }
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Deposit(_to, _pid, _amount);
     }
@@ -201,6 +219,10 @@ contract MasterChef is Ownable, ReentrancyGuard {
             uint256 pending = user.amount.mul(pool.accTokenPerShare).div(1e18).sub(user.rewardDebt);
             if (pending > 0) {
                 safeTokenTransfer(msg.sender, pending, _stake);
+            }
+            IRewarder _rewarder = rewarder[_pid];
+            if (address(_rewarder) != address(0)) {
+                _rewarder.onReward(_pid, msg.sender, msg.sender, pending, user.amount);
             }
         }
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
@@ -243,6 +265,11 @@ contract MasterChef is Ownable, ReentrancyGuard {
             user.amount = user.amount.sub(_amount);
             pool.lpToken.safeTransfer(address(msg.sender), _amount);
         }
+        // Interactions
+        IRewarder _rewarder = rewarder[_pid];
+        if (address(_rewarder) != address(0)) {
+            _rewarder.onReward(_pid, msg.sender, msg.sender, 0, user.amount);
+        }
         user.rewardDebt = user.amount.mul(pool.accTokenPerShare).div(1e18);
         emit Withdraw(msg.sender, _pid, _amount);
     }
@@ -254,6 +281,10 @@ contract MasterChef is Ownable, ReentrancyGuard {
         uint256 amount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
+        IRewarder _rewarder = rewarder[_pid];
+        if (address(_rewarder) != address(0)) {
+            _rewarder.onReward(_pid, msg.sender, msg.sender, 0, 0);
+        }
         pool.lpToken.safeTransfer(address(msg.sender), amount);
         emit EmergencyWithdraw(msg.sender, _pid, amount);
     }
@@ -296,15 +327,15 @@ contract MasterChef is Ownable, ReentrancyGuard {
         emit SetMarketingAddress(msg.sender, _marketingAddress);
     }
     
-    function updateEmissionRate(uint256 _tokenPerBlock) external onlyOwner {
+    function updateEmissionRate(uint256 _tokenPerSecond) external onlyOwner {
         massUpdatePools();
-        tokenPerBlock = _tokenPerBlock;
-        emit UpdateEmissionRate(msg.sender, _tokenPerBlock);
+        tokenPerSecond = _tokenPerSecond;
+        emit UpdateEmissionRate(msg.sender, _tokenPerSecond);
     }
 
     // Only update before start of farm
-    function updateStartBlock(uint256 _startBlock) external onlyOwner {
-	    require(startBlock > block.number, "Farm already started");
-        startBlock = _startBlock;
+    function updateStartTime(uint256 _startTime) external onlyOwner {
+	    require(_startTime > block.timestamp, "Farm already started");
+        startTime = _startTime;
     }
 }

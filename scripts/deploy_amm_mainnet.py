@@ -4,134 +4,209 @@ from scripts.deploy_utils import *
 
 Accs = setup_mainnet_accounts()
 
-INITIAL_IZA_MINT = '1000' + '000000000000000000'
-INITIAL_MTV_LIQ = '1000' + '000000000000000000'
+print(f"Deployer ETH balance: {Accs.deployer.balance()/1e18:.5f}")
 
-MARKETING_WALLET = ""
+network.gas_limit(11111111)
 
-# TOKENS
-WMTV = "0x8E321596267a4727746b2F48BC8736DB5Da26977"
-BUSD = "0xCd65eb7630e5A2C46E1b99c0F3a45611be4960B2"
-ONE = "0x4E51774CB9704109f6Ff8F9a9DfFd8fAF823C38f"
+INITIAL_IZA_MINT_AMOUNT = int(60000000000000000000000)
+FARM_START_TIME = 1648762200
+MARKETING_REWARD_ADDRESS = "0x495eac04d8947342d422cCfd69297d251780D498"
 
-USDC = "0xEa1199d50Ee09fA8062fd9dA3D55C6F90C1bABd2"
-WETH = "0x3b6e35574Fe60D7CeB9CA70DcA56D7294EF28926"
-AVAX = "0x175E9B026cf31fbE181628C9BDAb3DF6143b6F18"
-USDT = "0x2f9c74d3C42023C533437c9EE743D4a6329e78Df"
-BNB = "0x25009A734EfFE43cf7609Bc313E987d7ee8ee346"
-MOVR = "0x91c57B70EcD17DB27d22EaD74Cc86781936115E7"
-MATIC = "0x185B1FF9878D27DdE302A511FC2f80765232ADB7"
-FTM = "0x67558D91654A6ccbe88a3cc4e1DB862BC51fc322"
-CRO = "0x282A0c6a96747bfF4BAa80eBa6CE6744aafaBEbB"
-DIRT = "0x2eb19db032dc60039d35e36918d33197d9f7d7b9"
+# Tokens
+TOKENS = {
+    "WETH": "0xC9BdeEd33CD01541e1eeD10f90519d2C06Fe3feB",
+    "USDC": "0xB12BFcA5A55806AaF64E99521918A4bf0fC40802",
+    "USDT": "0x4988a896b1227218e4A686fdE5EabdcAbd91571f",
+    "NEAR": "0xC42C30aC6Cc15faC9bD938618BcaA1a1FaE8501d",
+    "UST": "0x5ce9F0B6AFb36135b5ddBF11705cEB65E634A9dC",
+    "AURORA": "0x8BEc47865aDe3B172A928df8f990Bc7f2A3b9f79",
+    "LUNA": "0xC4bdd27c33ec7daa6fcfd8532ddB524Bf4038096",
+    "stNEAR": "0x07F9F7f963C5cD2BBFFd30CcfB964Be114332E30",
+    "WBTC": "0xF4eB217Ba2454613b15dBdea6e5f22276410e89e",
+    "AVAX": "0x80A16016cC4A2E6a2CACA8a4a498b1699fF0f844",
+    "ONE": "0xDAe6c2A48BFAA66b43815c5548b10800919c993E",
+    "FTM": "0xB44a9B6905aF7c801311e8F4E76932ee959c663C",
+    "BNB": "0x2bF9b864cdc97b08B6D79ad4663e71B8aB65c45c",
+    "MATIC": "0x6aB6d61428fde76768D7b45D8BFeec19c6eF91A8",
+}
 
-iza = Contract.from_abi("IZA", IZA, IzaToken.abi)
-wmtv = Contract.from_abi("WMTV", WMTV, WETH9.abi)
-busd = interface.ERC20(BUSD)
-one = interface.ERC20(ONE)
 
-payout = DevPayouts[-1]
+weth = Contract.from_abi("WETH", TOKENS["WETH"], WETH9.abi)
+usdc = interface.ERC20(TOKENS["USDC"])
+near = interface.ERC20(TOKENS["NEAR"])
+aurora = interface.ERC20(TOKENS["AURORA"])
+ust = interface.ERC20(TOKENS["UST"])
+one = interface.ERC20(TOKENS["ONE"])
+iza = Contract.from_abi("IzaToken", "0x0017Be3E7e36ABF49FE67a78D08bf465bB755120", IzaToken.abi)
+dev_payout = Contract.from_abi("DevPayout", "0x84521183A3Be71e4A4C2dF5630982142fb47625E", DevPayouts.abi)
+
+factory = Contract.from_abi("Factory", "0x34696b6cE48051048f07f4cAfa39e3381242c3eD", Factory.abi)
+router = Router02[-1]  # 0x3d99B2F578d94f61adcD899DE55F2991522cefE1
+
+chef = Contract.from_abi("MasterChef", "0xAE20c9F0c4a7E0098D322F690DFea6534E105614", MasterChef.abi)
+xiza = Contract.from_abi("xToken", "0x00a761b10B4Ff8Fc205E685484a1da60451857e1", xToken.abi)
+sun_maker = Contract.from_abi("SunMaker", "0x2f4e4F2f514F15230BE9fFb2F56285A6aeaD47F1", SunMaker.abi)
+
+
+# Setup dev payout address
+# dev_payout = DevPayouts.deploy(Accs.from_deployer(allow_revert=True))
+# assert dev_payout.totalAllocPoint() == 1050, f"Bad totalAllocPoint, got {dev_payout.totalAllocPoint()} instead of 1050"
 
 # Deploy AMM
-factory = Factory.deploy(Accs.deployer, Accs.from_deployer())
-router = Router02.deploy(factory, WMTV, Accs.from_deployer())
-#factory = Factory[-1]
-#router = Router02[-1]
+# factory = Factory.deploy(Accs.deployer, Accs.from_deployer(allow_revert=True))
+# router = Router02.deploy(factory, weth, Accs.from_deployer(allow_revert=True))
+
 
 # Deploy Token + Masterchef
-# iza = IzaToken.deploy(Accs.from_deployer())
-# resp = iza.setExcludedFromAntiWhale(Accs.deployer, True, Accs.from_deployer())
-# resp = iza.addAuthorized(Accs.deployer, Accs.from_deployer())
-# iza.mint(Accs.deployer, INITIAL_IZA_MINT, Accs.from_deployer())
+# iza = IzaToken.deploy(Accs.from_deployer(allow_revert=True))
+# resp = iza.addAuthorized(Accs.deployer, Accs.from_deployer(allow_revert=True))
 
-_start_block = chain.height + 300
-_dev_address = payout.address
+_start_time = FARM_START_TIME
+_dev_address = dev_payout
 _feeAddress = Accs.deployer
-_marketingAddress = MARKETING_WALLET
+_marketingAddress = MARKETING_REWARD_ADDRESS
+chef = MasterChef.deploy(iza, _start_time, _dev_address, _feeAddress, _marketingAddress, Accs.from_deployer(allow_revert=True))
 
-chef = MasterChef.deploy(iza, _start_block, _dev_address, _feeAddress, _marketingAddress, Accs.from_deployer())
-resp = iza.setExcludedFromAntiWhale(chef, True, Accs.from_deployer())
 
 # Deploy xIZA contracts
-xiza = xToken.deploy("IZA Governance Token", "xIZA", iza.address, chef.address, Accs.deployer, Accs.from_deployer())
-sun_maker = SunMaker.deploy(factory, xiza, iza, WMTV, Accs.from_deployer())
-resp = iza.setExcludedFromAntiWhale(xiza, True, Accs.from_deployer())
-resp = iza.setExcludedFromAntiWhale(sun_maker, True, Accs.from_deployer())
+# xiza = xToken.deploy("IZA Governance Token", "xIZA", iza.address, chef.address, Accs.deployer, Accs.from_deployer(allow_revert=True))
+# sun_maker = SunMaker.deploy(factory, xiza, iza, near, Accs.from_deployer(allow_revert=True))
 # Set SunMaker to fee address
-resp = factory.setFeeTo(sun_maker, Accs.from_deployer())
+resp = factory.setFeeTo(sun_maker, Accs.from_deployer(allow_revert=True))
 
 # Set staking address
-chef.setStakingAddress(xiza, Accs.from_deployer())
+chef.setStakingAddress(xiza, Accs.from_deployer(allow_revert=True))
+
+resp = iza.setExcludedFromAntiWhale(Accs.deployer, True, Accs.from_deployer(allow_revert=True))
+resp = iza.setExcludedFromAntiWhale(dev_payout, True, Accs.from_deployer(allow_revert=True))
+resp = iza.setExcludedFromAntiWhale(chef, True, Accs.from_deployer(allow_revert=True))
+resp = iza.setExcludedFromAntiWhale(xiza, True, Accs.from_deployer(allow_revert=True))
+resp = iza.setExcludedFromAntiWhale(sun_maker, True, Accs.from_deployer(allow_revert=True))
+
+# Create LP tokens and masterchef pools
+# Pool 0 needs to be IZA
+chef.add(50, iza, 0, Accs.from_deployer(allow_revert=True))
 
 # Approve router to spend everything
-approve(WMTV, router, Accs.deployer)
-approve(busd, router, Accs.deployer)
-approve(one, router, Accs.deployer)
+approve(weth, router, Accs.deployer)
+approve(usdc, router, Accs.deployer)
+approve(near, router, Accs.deployer)
+approve(aurora, router, Accs.deployer)
 approve(iza, router, Accs.deployer)
 approve(xiza, router, Accs.deployer)
 
 # Create LP tokens
-resp = factory.createPair(WMTV, busd, Accs.from_deployer())
-lp_mtv_busd = resp.events['PairCreated']['pair']
+lp_usdc_weth = factory.getPair(weth, usdc)
+if lp_usdc_weth == ZERO_ADDRESS:
+    resp = factory.createPair(weth, usdc, Accs.from_deployer())
+    lp_usdc_weth = resp.events['PairCreated']['pair']
 
-resp = factory.createPair(iza, busd, Accs.from_deployer())
-lp_iza_busd = resp.events['PairCreated']['pair']
+lp_iza_usdc = factory.getPair(iza, usdc)
+if lp_iza_usdc == ZERO_ADDRESS:
+    resp = factory.createPair(iza, usdc, Accs.from_deployer())
+    lp_iza_usdc = resp.events['PairCreated']['pair']
 
-resp = factory.createPair(iza, WMTV, Accs.from_deployer())
-lp_iza_mtv = resp.events['PairCreated']['pair']
+lp_iza_weth = factory.getPair(iza, weth)
+if lp_iza_weth == ZERO_ADDRESS:
+    resp = factory.createPair(iza, weth, Accs.from_deployer())
+    lp_iza_weth = resp.events['PairCreated']['pair']
 
-resp = factory.createPair(iza, one, Accs.from_deployer())
-lp_iza_one = resp.events['PairCreated']['pair']
+lp_iza_near = factory.getPair(iza, near)
+if lp_iza_near == ZERO_ADDRESS:
+    resp = factory.createPair(iza, near, Accs.from_deployer())
+    lp_iza_near = resp.events['PairCreated']['pair']
+
+lp_iza_aurora = factory.getPair(iza, aurora)
+if lp_iza_aurora == ZERO_ADDRESS:
+    resp = factory.createPair(iza, aurora, Accs.from_deployer())
+    lp_iza_aurora = resp.events['PairCreated']['pair']
 
 # Add LPs to masterchef
-assert chef.poolLength() == 0, f"already have pools?? {chef.poolLength()}"
-# Pool 0 needs to be IZA
-chef.add(30, iza, 0, Accs.from_deployer())
-chef.add(100, lp_iza_mtv, 0, Accs.from_deployer())  # 1
-chef.add(50, lp_iza_busd, 0, Accs.from_deployer())  # 2
-chef.add(20, lp_iza_one, 0, Accs.from_deployer())  # 3
-chef.add(0, lp_mtv_busd, 0, Accs.from_deployer())  # 4
+assert chef.poolLength() == 1, f"already have pools?? {chef.poolLength()}"
+chef.add(150, lp_iza_usdc, 0, Accs.from_deployer())  # 1
+chef.add(175, lp_iza_weth, 0, Accs.from_deployer())  # 2
+chef.add(225, lp_iza_near, 0, Accs.from_deployer())  # 3
+chef.add(275, lp_iza_aurora, 0, Accs.from_deployer())  # 4
+chef.add(125, lp_iza_one, 0, Accs.from_deployer())  # 5
 
 assert chef.poolLength() == 5, "bad pool length"
+
+for cont in [IzaToken, Factory, Router02, xToken, SunMaker, MasterChef]:
+    save_verification_json(cont)
 
 print(f"""
 Contract Addresses
 ------------------------------
-DEX:
-WMTV     \t{WMTV}
-factory  \t{factory}
-router   \t{router}
+Tokens:
+WETH    \t{weth}
+USDC    \t{usdc}
+NEAR    \t{near}
+AURORA  \t{aurora}
+
+AMM:
+factory \t{factory}
+router  \t{router}
 pair hash\t{factory.pairCodeHash()}
 
 Farm:
 IZA       \t{iza}
-masterchef\t{chef}
 xIZA      \t{xiza}
+masterchef\t{chef}
 sunmaker  \t{sun_maker}
+dev payout\t{dev_payout}
 
 LP Addresses:
-IZA/MTV LP \t{lp_iza_mtv}
-IZA/BUSD LP\t{lp_iza_busd}
-IZA/ONE LP \t{lp_iza_one}
-MTV/BUSD LP\t{lp_mtv_busd}
+USDC/WETH LP\t{lp_usdc_weth}
+IZA/USDC LP\t{lp_iza_usdc}
+IZA/WETH LP\t{lp_iza_weth}
+IZA/NEAR LP\t{lp_iza_near}
+IZA/AURORA LP\t{lp_iza_aurora}
 
 """)
 
+##################################################################
+##################################################################
+# Launch
+##################################################################
+##################################################################
 
-# Go Live
+# Mint and transfer ownership of token to masterchef
+assert iza.totalSupply() == 0, "Already minted"
+iza.mint(Accs.deployer, INITIAL_IZA_MINT_AMOUNT, Accs.from_deployer())
+assert iza.totalSupply() == INITIAL_IZA_MINT_AMOUNT
+assert iza.balanceOf(Accs.deployer) == INITIAL_IZA_MINT_AMOUNT
 
-INITIAL_IZA_MINT = '30000' + '000000000000000000'
-INITIAL_MTV_LIQ = '820000' + '000000000000000000'  # TODO - finalize
-
-# Transfer ownership of token to masterchef
 iza.transferOwnership(chef, Accs.from_deployer())
 
-# Set anti-whale
+price_eth = 3293
+price_aurora = 9.103
+
+# Set Anti-whale
+print(f"IZA max transfer rate = {iza.maxTransferAmountRate()/100:.2f}%")
 resp = iza.updateMaxTransferAmountRate(100, Accs.from_deployer())
 print(f"IZA max transfer rate = {iza.maxTransferAmountRate()/100:.2f}%")
+
 # Add liquidity
-resp = router.addLiquidity(iza, WMTV, INITIAL_IZA_MINT, INITIAL_MTV_LIQ, 0, 0, Accs.deployer, int(chain.time()+3000), Accs.from_deployer())
+resp = router.addLiquidity(iza, aurora, INITIAL_IZA_MINT_AMOUNT, balanceOf(aurora, Accs.deployer), 0, 0, Accs.deployer, int(time.time()+3000), Accs.from_deployer())
+
+
+# reset anti-whale - 1%
+resp = iza.updateMaxTransferAmountRate(500, Accs.from_deployer())
 
 
 
+xiza_output = {}
 
+for i in range(200):
+    nonce = Accs.deployer.nonce
+    xiza = xToken.deploy("IZA Governance Token", "xIZA", iza.address, chef, Accs.deployer, Accs.from_deployer(allow_revert=True))
+    xiza_output[xiza.address] = nonce
+
+
+# nonce = Accs.deployer.nonce
+while Accs.deployer.nonce < 256:
+    print(f"Accs.deployer nonce = {Accs.deployer.nonce}")
+    print(f"Accs.deployer bal   = {Accs.deployer.balance()}")
+    # iza = IzaToken.deploy(Accs.from_deployer())
+    Accs.deployer.transfer(Accs.deployer, 0)
+    # nonce += 1

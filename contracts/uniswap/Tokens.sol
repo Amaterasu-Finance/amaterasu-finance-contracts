@@ -5,10 +5,10 @@ pragma solidity 0.6.12;
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/access/Ownable.sol";
 import "github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v3.1.0/contracts/token/ERC20/ERC20.sol";
 
-contract tUSDC is ERC20("Test USDC", "tUSDC"), Ownable {
+contract USDC is ERC20("Test USDC", "USDC"), Ownable {
 
     constructor () public {
-        _setupDecimals(18);
+        _setupDecimals(6);
     }
 
     function mint(address _to, uint256 _amount) public onlyOwner {
@@ -16,25 +16,34 @@ contract tUSDC is ERC20("Test USDC", "tUSDC"), Ownable {
     }
 }
 
-contract tETH is ERC20("Test ETH", "tETH"), Ownable {
+contract USDT is ERC20("Test USDT", "USDT"), Ownable {
+
+    constructor () public {
+        _setupDecimals(6);
+    }
+
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
     }
 }
 
-contract tFTM is ERC20("Test FTM", "tFTM"), Ownable {
+contract NEAR is ERC20("Test NEAR", "NEAR"), Ownable {
+    constructor () public {
+        _setupDecimals(24);
+    }
+
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
     }
 }
 
-contract tMIM is ERC20("Test MIM", "tMIM"), Ownable {
+contract UST is ERC20("Test UST", "atUST"), Ownable {
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
     }
 }
 
-contract tONE is ERC20("Test ONE", "tONE"), Ownable {
+contract AURORA is ERC20("Test AURORA", "AURORA"), Ownable {
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
     }
